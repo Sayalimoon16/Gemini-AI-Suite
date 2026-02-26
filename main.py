@@ -1,8 +1,14 @@
-import streamlit as st
+import os
 from PIL import Image
+import streamlit as st
 from streamlit_option_menu import option_menu
 import speech_recognition as sr
-import pyttsx3
+import streamlit.components.v1 as components
+
+
+if "last_response" not in st.session_state:
+    st.session_state.last_response = ""
+
 
 from gemini_utility import (
     load_gemini_model,
@@ -11,175 +17,171 @@ from gemini_utility import (
     embeddings_model_response
 )
 
-# ---------- PAGE CONFIG ----------
+working_dir = os.path.dirname(os.path.abspath(__file__))
+
 st.set_page_config(
-    page_title="Gemini AI Suite",
+    page_title="Gemini AI",
     page_icon="🧠",
-    layout="wide"
+    layout="centered",
 )
 
-# ---------- SIDEBAR ----------
 with st.sidebar:
-    st.markdown("## 🧠 Gemini AI Suite")
     selected = option_menu(
-        menu_title=None,
-        options=[
-            "ChatBot",
-            "Image Captioning",
-            "Text Embeddings",
-            "Ask Anything",
-            "Voice Assistant"
-        ],
-        icons=["chat-dots", "image", "braces", "question-circle", "mic"],
-        default_index=0,
+        'Gemini AI',
+        ['ChatBot',"Voice Assistant", 'Image Captioning', 'Embed text', 'Ask me anything'],
+        menu_icon='robot',
+        icons=['chat-dots-fill', "mic",'image-fill', 'textarea-t', 'patch-question-fill'],
+        default_index=0
     )
-    st.markdown("---")
-    st.caption("Built with Google Gemini + Streamlit")
 
-# ---------- ROLE MAP ----------
-def role_map(role):
-    return "assistant" if role == "model" else role
+if "prev_page" not in st.session_state:
+    st.session_state.prev_page = selected
+
+if st.session_state.prev_page != selected:
+    st.session_state.prev_page = selected
+
+# Function to translate roles between Gemini and Streamlit terminology
+def translate_role_for_streamlit(user_role):
+    if user_role == "model":
+        return "assistant"
+    else:
+        return user_role
+
 
 # ---------- VOICE FUNCTIONS ----------
 def voice_to_text():
     r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎤 Listening... Speak now")
-        audio = r.listen(source, timeout=5)
+
     try:
-        text = r.recognize_google(audio)
-        return text
-    except:
+        with sr.Microphone() as source:
+            st.info("🎤 Listening... Speak now")
+            audio = r.listen(source, timeout=5)
+    except Exception:
         return ""
 
-def speak(text):
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
+    try:
+        return r.recognize_google(audio)
+    except Exception:
+        return ""
+# -------------------if You want Female Voice ---------------------add this instead -----------#
+# def speak_browser(text):
+        # st.session_state.last_response = text
+#     js_code = f"""
+#     <script>
+#     var voices = window.speechSynthesis.getVoices();
+#     var msg = new SpeechSynthesisUtterance(`{text}`);
+#     msg.voice = voices.find(v => v.name.includes('Female')) || voices[0];
+#     window.speechSynthesis.speak(msg);
+#     </script>
+#     """
+#     components.html(js_code, height=0)
+def speak_browser(text):
+
+    if not text:
+        return
+
+    # Escape special characters
+    safe_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+    js_code = f"""
+    <script>
+    window.speechSynthesis.cancel();
+
+    var msg = new SpeechSynthesisUtterance("{safe_text}");
+    msg.lang = "en-US";
+    msg.rate = 1;
+    msg.pitch = 1;
+    msg.volume = 1;
+
+    window.speechSynthesis.speak(msg);
+    </script>
+    """
+
+    components.html(js_code, height=120)
+
+def stop_browser_speech():
+    js_code = """
+    <script>
+    window.speechSynthesis.cancel();
+    </script>
+    """
+    components.html(js_code, height=0)
 
 
-# ================= CHATBOT =================
-if selected == "ChatBot":
 
-    st.title("💬 Gemini Chat Assistant")
+
+def replay_browser_speech():
+
+    text = st.session_state.last_response
+
+    if not text:
+        return
+
+    safe_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+    js_code = f"""
+    <script>
+    window.speechSynthesis.cancel();
+
+    var msg = new SpeechSynthesisUtterance("{safe_text}");
+    msg.lang = "en-US";
+
+    window.speechSynthesis.speak(msg);
+    </script>
+    """
+
+    components.html(js_code, height=120)
+
+
+
+# ---------------- CHATBOT ----------------
+if selected == 'ChatBot':
 
     model = load_gemini_model()
 
     if "chat_session" not in st.session_state:
         st.session_state.chat_session = model.start_chat(history=[])
 
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        if st.button("🗑 Clear"):
-            st.session_state.chat_session = model.start_chat(history=[])
-            st.rerun()
+    st.title("🤖 ChatBot")
 
-    for msg in st.session_state.chat_session.history:
-        with st.chat_message(role_map(msg.role)):
-            st.markdown(msg.parts[0].text)
+    for message in st.session_state.chat_session.history:
+        with st.chat_message(translate_role_for_streamlit(message.role)):
+            st.markdown(message.parts[0].text)
 
-    user_input = st.chat_input("Type your message...")
+    user_prompt = st.chat_input("Ask Gemini...")
 
-    if user_input:
-        with st.chat_message("user"):
-            st.markdown(user_input)
+    if user_prompt:
+        st.chat_message("user").markdown(user_prompt)
 
-        with st.spinner("Gemini thinking..."):
-            response = st.session_state.chat_session.send_message(user_input)
+        gemini_response = st.session_state.chat_session.send_message(user_prompt)
+
 
         with st.chat_message("assistant"):
-            st.markdown(response.text)
+            st.markdown(gemini_response.text)
 
+            # Save response
+            st.session_state.last_response = gemini_response.text
 
-# ================= IMAGE CAPTIONING =================
-elif selected == "Image Captioning":
-
-    st.title("🖼️ AI Image Captioning")
-
-    uploaded = st.file_uploader(
-        "Upload image",
-        type=["jpg", "jpeg", "png"]
-    )
-
-    if uploaded:
-        image = Image.open(uploaded)
-
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.image(image, caption="Uploaded Image")
-
-        with col2:
-            st.markdown("### Caption")
-            if st.button("✨ Generate Caption"):
-                with st.spinner("Analyzing image..."):
-                    caption = gemini_vision_response(
-                        "Describe this image in one natural sentence.",
-                        image
-                    )
-                st.success(caption)
-
-
-# ================= EMBEDDINGS =================
-elif selected == "Text Embeddings":
-
-    st.title("🔡 Text Embedding Generator")
-
-    text = st.text_area(
-        "Enter text",
-        placeholder="Type text to embed...",
-        height=150
-    )
-
-    if st.button("⚡ Generate Embedding"):
-        if not text.strip():
-            st.warning("Please enter some text")
-        else:
-            with st.spinner("Creating embedding vector..."):
-                vector = embeddings_model_response(text)
-
-            dim = len(vector)
-
-            st.success("Embedding generated")
+            msg_id = len(st.session_state.chat_session.history)
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Vector Dimension", dim)
-            col2.metric("Text Length", len(text))
-            col3.metric("Model", "Gemini")
 
-            st.markdown("### 🔍 Vector Preview (first 20 values)")
-            st.code(vector[:20])
+            with col1:
+                if st.button("🔊 Speak", key=f"speak_{msg_id}"):
+                    speak_browser(st.session_state.last_response)
 
-            with st.expander("📊 Full Embedding Vector"):
-                st.write(vector)
+            with col2:
+                if st.button("🔁 Replay", key=f"replay_{msg_id}"):
+                    replay_browser_speech()
 
-
-# ================= ASK ANYTHING =================
-elif selected == "Ask Anything":
-
-    st.title("❓ Ask Gemini Anything")
-
-    question = st.text_area(
-        "Your question",
-        placeholder="Ask anything..."
-    )
-
-    if st.button("Get Answer"):
-        if not question.strip():
-            st.warning("Please enter a question")
-        else:
-            with st.spinner("Generating answer..."):
-                answer = gemini_text_response(question)
-
-            st.markdown(answer)
-
-
+            with col3:
+                if st.button("🛑 Stop", key=f"stop_{msg_id}"):
+                    stop_browser_speech()
 # ================= VOICE ASSISTANT =================
 elif selected == "Voice Assistant":
 
     st.title("🎤 Gemini Voice Assistant")
-
-    st.info("Click and speak. Gemini will answer.")
+    auto_voice = st.toggle("🔊 Auto Speak")
 
     if st.button("🎙 Start Listening"):
         text = voice_to_text()
@@ -191,8 +193,72 @@ elif selected == "Voice Assistant":
                 response = gemini_text_response(text)
 
             st.success(response)
+            st.session_state.last_response = response
 
-            # Speak response
-            speak(response)
+            if auto_voice:
+                speak_browser(response)
+
         else:
             st.warning("Could not recognize speech")
+
+    # Controls always visible
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("🔊 Speak Response"):
+            speak_browser(st.session_state.last_response)
+
+    with col2:
+        if st.button("🔁 Replay"):
+            replay_browser_speech()
+    
+    with col3:
+        if st.button("🛑 Stop Voice"):
+            stop_browser_speech()
+# ---------------- IMAGE CAPTIONING ----------------
+if selected == "Image Captioning":
+
+    st.title("📷 Snap Narrate")
+
+    uploaded_image = st.file_uploader("Upload an image...", type=["jpg", "jpeg", "png"])
+
+    if uploaded_image and st.button("Generate Caption"):
+
+        image = Image.open(uploaded_image)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            resized_img = image.resize((800, 500))
+            st.image(resized_img)
+
+        default_prompt = "Write a short caption for this image"
+
+        caption = gemini_vision_response(default_prompt, image)
+
+        with col2:
+            st.info(caption)
+
+
+# ---------------- EMBEDDINGS ----------------
+if selected == "Embed text":
+
+    st.title("🔡 Embed Text")
+
+    user_prompt = st.text_area('', placeholder="Enter the text to get embeddings")
+
+    if st.button("Get Embedding"):
+        response = embeddings_model_response(user_prompt)
+        st.write(response)
+
+
+# ---------------- ASK ANYTHING ----------------
+if selected == "Ask me anything":
+
+    st.title("❓ Ask me a question")
+
+    user_prompt = st.text_area('', placeholder="Ask me anything...")
+
+    if st.button("Get Response"):
+        response = gemini_text_response(user_prompt)
+        st.markdown(response)
